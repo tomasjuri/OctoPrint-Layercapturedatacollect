@@ -219,6 +219,80 @@
         </div>
     </div>
 
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox" data-bind="checked: settings.plugins.LayerCaptureDatacollect.fake_camera_mode">
+                {{ _('Use fake camera for testing') }}
+            </label>
+            <span class="help-block">{{ _('Enable fake camera mode to test without physical camera hardware') }}</span>
+        </div>
+    </div>
+
+    <div class="row-fluid">
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Resolution Width') }}</label>
+                <div class="controls">
+                    <input type="number" step="1" min="320" max="4096" class="input-small" 
+                           data-bind="value: settings.plugins.LayerCaptureDatacollect.camera_resolution_x">
+                    <span class="help-block">{{ _('Camera resolution width in pixels') }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Resolution Height') }}</label>
+                <div class="controls">
+                    <input type="number" step="1" min="240" max="3072" class="input-small" 
+                           data-bind="value: settings.plugins.LayerCaptureDatacollect.camera_resolution_y">
+                    <span class="help-block">{{ _('Camera resolution height in pixels') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row-fluid">
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('ISO Setting') }}</label>
+                <div class="controls">
+                    <select class="input-small" data-bind="value: settings.plugins.LayerCaptureDatacollect.camera_iso">
+                        <option value="100">ISO 100</option>
+                        <option value="200">ISO 200</option>
+                        <option value="400">ISO 400</option>
+                        <option value="800">ISO 800</option>
+                    </select>
+                    <span class="help-block">{{ _('Camera ISO sensitivity') }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Rotation') }}</label>
+                <div class="controls">
+                    <select class="input-small" data-bind="value: settings.plugins.LayerCaptureDatacollect.camera_rotation">
+                        <option value="0">0°</option>
+                        <option value="90">90°</option>
+                        <option value="180">180°</option>
+                        <option value="270">270°</option>
+                    </select>
+                    <span class="help-block">{{ _('Camera rotation in degrees') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <label class="control-label">{{ _('Shutter Speed (μs)') }}</label>
+        <div class="controls">
+            <input type="number" step="1000" min="0" max="6000000" class="input-medium" 
+                   data-bind="value: settings.plugins.LayerCaptureDatacollect.camera_shutter_speed"
+                   placeholder="0 (auto)">
+            <span class="help-block">{{ _('Camera shutter speed in microseconds (0 = automatic)') }}</span>
+        </div>
+    </div>
+
     <hr>
 
     <!-- Advanced Settings Section -->

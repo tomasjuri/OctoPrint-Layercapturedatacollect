@@ -112,8 +112,14 @@ $(function() {
                 var status = "Status: " + 
                     (response.enabled ? "Enabled" : "Disabled") + 
                     " | Layer: " + response.current_layer + 
-                    " | Last captured: " + response.last_captured_layer +
-                    " | Camera: " + (response.camera_available ? "Available" : "Not available");
+                    " | Last captured: " + response.last_captured_layer;
+                
+                // Camera status with type and mode info
+                var cameraInfo = response.camera_available ? 
+                    "Available (" + response.camera_type + 
+                    (response.fake_camera_mode ? " - FAKE MODE" : "") + ")" : 
+                    "Not available";
+                status += " | Camera: " + cameraInfo;
                 
                 if (response.print_file) {
                     status += " | File: " + response.print_file;
@@ -266,6 +272,20 @@ $(function() {
             settings.calibration_file_path.subscribe(function(newValue) {
                 // Could add file existence check here in the future
                 console.log("Calibration file path changed to:", newValue);
+            });
+            
+            // Watch camera settings for feedback
+            settings.fake_camera_mode.subscribe(function(newValue) {
+                console.log("Fake camera mode:", newValue ? "ENABLED" : "DISABLED");
+                if (newValue) {
+                    self.showStatus("Fake camera mode enabled - great for testing!", true);
+                }
+            });
+            settings.camera_resolution_x.subscribe(function(newValue) {
+                console.log("Camera resolution X changed to:", newValue);
+            });
+            settings.camera_resolution_y.subscribe(function(newValue) {
+                console.log("Camera resolution Y changed to:", newValue);
             });
         };
 

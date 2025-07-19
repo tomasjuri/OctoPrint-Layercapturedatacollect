@@ -1,0 +1,4 @@
+include README.md
+recursive-include octoprint_LayerCaptureDatacollect/templates *
+recursive-include octoprint_LayerCaptureDatacollect/translations *
+recursive-include octoprint_LayerCaptureDatacollect/static *

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OctoPrint-Layercapturedatacollect"
+version = "0.1.0"
+description = "An OctoPrint plugin that automatically captures images at specified print layers with configurable grid positions for 3D print monitoring and analysis. Data"
+authors = [
+    {name = "Tomáš Juřica", email = "tomasjuri@gmail.com"}
+]
+readme = {file = "README.md", content-type = "markdown"}
+dynamic = [
+    "license"
+]
+
+requires-python = ">=3.7, <4"
+
+# any additional requirements (besides OctoPrint) should be listed here
+dependencies = []
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = [
+    "octoprint_LayerCaptureDatacollect",
+    "octoprint_LayerCaptureDatacollect.*"
+]
+
+[project.entry-points."octoprint.plugin"]
+LayerCaptureDatacollect = "octoprint_LayerCaptureDatacollect"
+
+[project.urls]
+Homepage = "https://github.com/tomasjuri/OctoPrint-Layercapturedatacollect"
+
+[project.optional-dependencies]
+develop = [
+    "go-task-bin"
+]

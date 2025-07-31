@@ -157,8 +157,6 @@ class LayerCaptureDatacollectPlugin(
         # Layer tracking events
         elif event == octoprint.events.Events.POSITION_UPDATE:
             self._on_z_change(payload)
-        elif event == octoprint.events.Events.PRINT_PROGRESS:
-            self._on_printing_progress(payload)
         
         # Error handling events
         elif event == octoprint.events.Events.ERROR:
@@ -718,15 +716,6 @@ class LayerCaptureDatacollectPlugin(
             self._print_paused_for_capture = False
         else:
             self._logger.debug("Print resumed by user/system")
-
-    def _on_printing_progress(self, payload):
-        """Handle printing progress updates"""
-        if not self._capture_active:
-            return
-            
-        progress = payload.get("progress", 0)
-        if progress is not None:
-            self._print_progress = progress
 
     def _on_error(self, payload):
         """Handle error events"""

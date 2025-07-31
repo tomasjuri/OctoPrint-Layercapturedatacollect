@@ -19,7 +19,6 @@ requires-python = ">=3.7, <4"
 # any additional requirements (besides OctoPrint) should be listed here
 dependencies = [
     "Pillow>=8.0.0",  # For image processing and fake camera generation
-    "picamera2>=0.3.0; platform_machine=='armv7l' or platform_machine=='aarch64'",  # Raspberry Pi camera (only on ARM)
 ]
 
 [tool.setuptools]

@@ -293,6 +293,128 @@
         </div>
     </div>
 
+    <!-- Advanced Camera Controls (camera-streamer inspired) -->
+    <hr>
+    <h4>{{ _('Advanced Camera Controls') }}</h4>
+    <p class="help-block">{{ _('Modern camera controls inspired by camera-streamer for enhanced image quality') }}</p>
+
+    <div class="row-fluid">
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Exposure Mode') }}</label>
+                <div class="controls">
+                    <select class="input-medium" data-bind="value: settings.plugins.LayerCaptureDatacollect.exposure_mode">
+                        <option value="auto">{{ _('Automatic') }}</option>
+                        <option value="manual">{{ _('Manual') }}</option>
+                    </select>
+                    <span class="help-block">{{ _('Automatic or manual exposure control') }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('White Balance') }}</label>
+                <div class="controls">
+                    <select class="input-medium" data-bind="value: settings.plugins.LayerCaptureDatacollect.white_balance_mode">
+                        <option value="auto">{{ _('Automatic') }}</option>
+                        <option value="daylight">{{ _('Daylight') }}</option>
+                        <option value="tungsten">{{ _('Tungsten') }}</option>
+                        <option value="fluorescent">{{ _('Fluorescent') }}</option>
+                    </select>
+                    <span class="help-block">{{ _('White balance mode for different lighting conditions') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row-fluid">
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Brightness') }}</label>
+                <div class="controls">
+                    <input type="number" step="0.1" min="-1.0" max="1.0" class="input-small" 
+                           data-bind="value: settings.plugins.LayerCaptureDatacollect.brightness"
+                           placeholder="0.0">
+                    <span class="help-block">{{ _('Brightness adjustment (-1.0 to 1.0)') }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Contrast') }}</label>
+                <div class="controls">
+                    <input type="number" step="0.1" min="0.0" max="2.0" class="input-small" 
+                           data-bind="value: settings.plugins.LayerCaptureDatacollect.contrast"
+                           placeholder="1.0">
+                    <span class="help-block">{{ _('Contrast adjustment (1.0 = normal)') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row-fluid">
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Saturation') }}</label>
+                <div class="controls">
+                    <input type="number" step="0.1" min="0.0" max="2.0" class="input-small" 
+                           data-bind="value: settings.plugins.LayerCaptureDatacollect.saturation"
+                           placeholder="1.0">
+                    <span class="help-block">{{ _('Color saturation (1.0 = normal)') }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Sharpness') }}</label>
+                <div class="controls">
+                    <input type="number" step="0.1" min="0.0" max="2.0" class="input-small" 
+                           data-bind="value: settings.plugins.LayerCaptureDatacollect.sharpness"
+                           placeholder="1.0">
+                    <span class="help-block">{{ _('Image sharpness (1.0 = normal)') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row-fluid">
+        <div class="span6">
+            <div class="control-group">
+                <label class="control-label">{{ _('Noise Reduction') }}</label>
+                <div class="controls">
+                    <select class="input-medium" data-bind="value: settings.plugins.LayerCaptureDatacollect.noise_reduction_mode">
+                        <option value="auto">{{ _('Automatic') }}</option>
+                        <option value="off">{{ _('Off') }}</option>
+                        <option value="fast">{{ _('Fast') }}</option>
+                        <option value="high_quality">{{ _('High Quality') }}</option>
+                    </select>
+                    <span class="help-block">{{ _('Noise reduction algorithm') }}</span>
+                </div>
+            </div>
+        </div>
+        <div class="span6">
+            <div class="control-group">
+                <div class="controls">
+                    <label class="checkbox">
+                        <input type="checkbox" data-bind="checked: settings.plugins.LayerCaptureDatacollect.enable_image_processing">
+                        {{ _('Enable Image Processing') }}
+                    </label>
+                    <span class="help-block">{{ _('Enable post-capture image processing') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+                <input type="checkbox" data-bind="checked: settings.plugins.LayerCaptureDatacollect.auto_enhance">
+                {{ _('Auto Enhancement') }}
+            </label>
+            <span class="help-block">{{ _('Automatically enhance images with subtle improvements') }}</span>
+        </div>
+    </div>
+
     <hr>
 
     <!-- Advanced Settings Section -->
@@ -320,10 +442,22 @@
                                data-bind="value: settings.plugins.LayerCaptureDatacollect.capture_delay">
                         <span class="add-on">s</span>
                     </div>
-                    <span class="help-block">{{ _('Delay after positioning before taking photo') }}</span>
-                </div>
-            </div>
+                                <span class="help-block">{{ _('Delay after positioning before taking photo') }}</span>
         </div>
+    </div>
+</div>
+
+<div class="control-group">
+    <div class="controls">
+        <label class="checkbox">
+            <input type="checkbox" data-bind="checked: settings.plugins.LayerCaptureDatacollect.enable_movement">
+            {{ _('Enable Print Head Movement') }}
+        </label>
+        <span class="help-block">{{ _('Enable actual print head movement during captures (disable for testing without moving)') }}</span>
+    </div>
+</div>
+
+
     </div>
 
     <hr>

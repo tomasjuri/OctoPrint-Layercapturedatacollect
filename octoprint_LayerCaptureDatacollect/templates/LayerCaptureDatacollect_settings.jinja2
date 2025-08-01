@@ -483,47 +483,4 @@
             <span class="help-block">{{ _('Path to the calibration file for camera positioning (optional)') }}</span>
         </div>
     </div>
-
-    <hr>
-
-    <!-- Status and Actions Section -->
-    <h5>{{ _('Status & Actions') }}</h5>
-    <div class="control-group">
-        <div class="controls">
-            <button class="btn btn-small" data-bind="click: testCamera">
-                <i class="fa fa-camera"></i> {{ _('Test Camera') }}
-            </button>
-            <button class="btn btn-small" data-bind="click: captureNow, enable: isPrinting">
-                <i class="fa fa-photo"></i> {{ _('Capture Now') }}
-            </button>
-            <button class="btn btn-small" data-bind="click: getStatus">
-                <i class="fa fa-info-circle"></i> {{ _('Get Status') }}
-            </button>
-            <button class="btn btn-small" data-bind="click: testPaths">
-                <i class="fa fa-folder-open"></i> {{ _('Test Paths') }}
-            </button>
-        </div>
-    </div>
-
-    <!-- Status Display -->
-    <div class="control-group" data-bind="visible: statusMessage">
-        <div class="controls">
-            <div class="alert" data-bind="css: {'alert-success': statusSuccess, 'alert-error': !statusSuccess()}, text: statusMessage">
-            </div>
-        </div>
-    </div>
-
-    <!-- Grid Preview -->
-    <div class="control-group">
-        <label class="control-label">{{ _('Grid Preview') }}</label>
-        <div class="controls">
-            <div id="grid-preview" style="width: 300px; height: 200px; border: 1px solid #ccc; position: relative; background: #f9f9f9;">
-                <div style="position: absolute; top: 10px; left: 10px; font-size: 10px; color: #666;">
-                    {{ _('Print bed visualization') }}
-                </div>
-                <!-- Grid points will be dynamically added here via JavaScript -->
-            </div>
-            <span class="help-block">{{ _('Visual representation of capture grid on your print bed') }}</span>
-        </div>
-    </div>
 </div> 

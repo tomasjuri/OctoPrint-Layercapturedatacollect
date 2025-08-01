@@ -20,7 +20,8 @@ class LayerCaptureDatacollectPlugin(
     octoprint.plugin.TemplatePlugin,
     octoprint.plugin.EventHandlerPlugin,
     octoprint.plugin.SimpleApiPlugin,
-    octoprint.plugin.StartupPlugin
+    octoprint.plugin.StartupPlugin,
+    octoprint.plugin.PrinterPlugin
 ):
 
     def __init__(self):
@@ -163,32 +164,6 @@ class LayerCaptureDatacollectPlugin(
             self._on_error(payload)
         elif event == octoprint.events.Events.DISCONNECTED:
             self._on_disconnected(payload)
-
-    ##~~ SimpleApiPlugin mixin
-
-    def get_api_commands(self):
-        return {
-            "capture_now": [],
-            "get_status": [],
-            "enable": [],
-            "disable": [],
-            "test_camera": [],
-            "test_paths": []
-        }
-
-    def on_api_command(self, command, data):
-        if command == "capture_now":
-            return self._api_capture_now()
-        elif command == "get_status":
-            return self._api_get_status()
-        elif command == "enable":
-            return self._api_enable()
-        elif command == "disable":
-            return self._api_disable()
-        elif command == "test_camera":
-            return self._api_test_camera()
-        elif command == "test_paths":
-            return self._api_test_paths()
 
     ##~~ Core Plugin Methods
 
@@ -1124,169 +1099,6 @@ class LayerCaptureDatacollectPlugin(
             
             self._movement_in_progress = False
             raise
-
-    ##~~ API Methods
-
-    def _api_capture_now(self):
-        """API command to capture images now"""
-        try:
-            if not self._camera_available:
-                return {"success": False, "message": "Camera not available"}
-            
-            # Get current position or use defaults
-            current_position = 0
-            if hasattr(self._printer, 'get_current_data'):
-                printer_data = self._printer.get_current_data()
-                if printer_data and 'currentZ' in printer_data:
-                    current_position = printer_data['currentZ'] or 0
-            
-            # Capture at current grid center position
-            capture_position = {
-                'x': self._settings.get(["grid_center_x"]),
-                'y': self._settings.get(["grid_center_y"]),
-                'z': current_position + self._settings.get(["z_offset"]),
-                'index': 0
-            }
-            
-            layer_info = {
-                'layer': 'MANUAL',
-                'z_height': current_position
-            }
-            
-            # Capture and save image
-            result = self._capture_and_save_image(capture_position, layer_info)
-            
-            return {
-                "success": True,
-                "message": f"Manual capture successful - saved {result['filename']}",
-                "image_path": result['image_path'],
-                "metadata_path": result['metadata_path']
-            }
-            
-        except Exception as e:
-            self._logger.error(f"Manual capture failed: {e}")
-            return {"success": False, "message": f"Capture failed: {str(e)}"}
-
-    def _api_get_status(self):
-        """API command to get plugin status"""
-        return {
-            "enabled": self._settings.get(["enabled"]),
-            "capture_active": self._capture_active,
-            "current_layer": self._current_layer,
-            "last_captured_layer": self._last_captured_layer,
-            "current_z_height": self._current_z_height,
-            "print_progress": self._print_progress,
-            "camera_available": getattr(self, '_camera_available', False),
-            "camera_type": getattr(self, '_camera_type', 'none'),
-            "fake_camera_mode": self._settings.get(["fake_camera_mode"]),
-            "print_file": self._current_gcode_file,
-            "print_start_time": self._print_start_time.isoformat() if self._print_start_time else None,
-            "save_path": self._get_save_path(),
-            "calibration_file": self._get_calibration_file_path(),
-            "movement_in_progress": self._movement_in_progress,
-            "print_paused_for_capture": self._print_paused_for_capture,
-            "original_position_stored": self._original_position is not None
-        }
-
-    def _api_enable(self):
-        """API command to enable plugin"""
-        self._settings.set(["enabled"], True)
-        self._settings.save()
-        return {"success": True, "message": "Plugin enabled"}
-
-    def _api_disable(self):
-        """API command to disable plugin"""
-        self._settings.set(["enabled"], False)
-        self._settings.save()
-        return {"success": True, "message": "Plugin disabled"}
-
-    def _api_test_camera(self):
-        """API command to test camera"""
-        try:
-            if not self._camera_available:
-                return {
-                    "success": False,
-                    "message": "Camera not available",
-                    "available": False,
-                    "camera_type": getattr(self, '_camera_type', 'none')
-                }
-            
-            # Capture a test image
-            test_position = {
-                'x': 125.0,
-                'y': 105.0,
-                'z': 5.0,
-                'layer': 'TEST'
-            }
-            
-            image_data = self._capture_image(test_position)
-            
-            # Save test image
-            save_path = self._ensure_save_directory()
-            if save_path:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"camera_test_{timestamp}.{self._settings.get(['image_format'])}"
-                filepath = os.path.join(save_path, filename)
-                
-                with open(filepath, 'wb') as f:
-                    f.write(image_data)
-                
-                return {
-                    "success": True,
-                    "message": f"Camera test successful - image saved as {filename}",
-                    "available": True,
-                    "camera_type": self._camera_type,
-                    "image_size": len(image_data),
-                    "filepath": filepath
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": "Camera test failed - could not create save directory",
-                    "available": True,
-                    "camera_type": self._camera_type
-                }
-                
-        except Exception as e:
-            self._logger.error(f"Camera test failed: {e}")
-            return {
-                "success": False,
-                "message": f"Camera test failed: {str(e)}",
-                "available": getattr(self, '_camera_available', False),
-                "camera_type": getattr(self, '_camera_type', 'none')
-            }
-
-    def _api_test_paths(self):
-        """API command to test file paths configuration"""
-        results = {}
-        
-        # Test save path
-        save_path = self._ensure_save_directory()
-        results["save_path"] = {
-            "path": save_path,
-            "exists": save_path is not None and os.path.exists(save_path),
-            "writable": save_path is not None and os.access(save_path, os.W_OK) if save_path else False
-        }
-        
-        # Test calibration file
-        cal_valid, cal_message = self._validate_calibration_file()
-        cal_path = self._get_calibration_file_path()
-        results["calibration_file"] = {
-            "path": cal_path,
-            "configured": cal_path is not None and cal_path != "",
-            "valid": cal_valid,
-            "message": cal_message
-        }
-        
-        success = results["save_path"]["writable"] and (
-            not results["calibration_file"]["configured"] or results["calibration_file"]["valid"]
-        )
-        
-        return {
-            "success": success,
-            "message": "Path configuration tested",
-            "results": results
-        }
 
     ##~~ Softwareupdate hook
 

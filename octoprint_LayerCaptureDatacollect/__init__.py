@@ -1,4 +1,4 @@
-from .LayerCaptureDatacollectPlugin import LayerCaptureDatacollectPlugin
+from .LayerCaptureDatacollect import LayerCaptureDatacollect
 
 __plugin_name__ = "Layer Capture Data Collect"
 __plugin_pythoncompat__ = ">=3,<4"
@@ -7,7 +7,7 @@ __plugin_description__ = "An OctoPrint plugin that automatically captures images
 
 def __plugin_load__():
     global __plugin_implementation__
-    __plugin_implementation__ = LayerCaptureDatacollectPlugin()
+    __plugin_implementation__ = LayerCaptureDatacollect()
 
     global __plugin_hooks__
     __plugin_hooks__ = {

@@ -7,6 +7,7 @@ import octoprint.printer
 import octoprint.util
 
 import os
+import re
 import logging
 import time
 import json
@@ -254,18 +255,22 @@ class LayerCaptureDatacollect(
 
     def gcode_command_sent(self, comm_instance, phase, cmd, cmd_type, gcode, *args, **kwargs):
         """Capture sequence detection and capture action"""
+        line = cmd.strip().upper()
+        try:        
+            # pattern: "G1 Z" followed by number, with optional F (feedrate)
+            pattern = r'^G1\s+Z\s*[+-]?\d*\.?\d+(?:\s+F\s*\d+)?\s*(?:;.*)?$'
+            if re.match(pattern, line):
+                # This is definitely a Z-only movement
+                z_match = re.search(r'Z\s*([+-]?\d*\.?\d+)', line)
+                if z_match:
+                    z_value = float(z_match.group(1))
+                    self._detected_z_height = z_value
+                    self._logger.info(f"Layer change detected: {z_value}mm")
+        except Exception as e:
+            self._logger.error(f"Failed to parse Z height: {e}")
+            return None
+        
         try:
-            line = cmd.strip().upper()
-            
-            # Detect Z height from layer change
-            if ";Z:" in line:
-                try:
-                    z_value = line.split(";Z:")[1].strip()
-                    self._detected_z_height = float(z_value)
-                    self._logger.debug(f"Layer Z: {self._detected_z_height}mm")
-                except Exception as e:
-                    self._logger.error(f"Failed to parse Z height: {e}")
-            
             # Trigger capture on M240
             if "M240" in line:
                 self._logger.info("M240 detected - starting simple capture")
@@ -279,7 +284,6 @@ class LayerCaptureDatacollect(
                     
         except Exception as e:
             self._logger.error(f"G-code hook error: {e}")
-        
         return None
 
     def _capture(self):

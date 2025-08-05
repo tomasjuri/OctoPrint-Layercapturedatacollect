@@ -1,4 +1,6 @@
 from .LayerCaptureDatacollect import LayerCaptureDatacollect
+from .hooks import *
+
 
 __plugin_name__ = "Layer Capture Data Collect"
 __plugin_pythoncompat__ = ">=3,<4"
@@ -11,5 +13,7 @@ def __plugin_load__():
 
     global __plugin_hooks__
     __plugin_hooks__ = {
-        "octoprint.plugin.softwareupdate.check_config": __plugin_implementation__.get_update_information
+        "octoprint.plugin.softwareupdate.check_config": __plugin_implementation__.get_update_information,
+        "octoprint.comm.protocol.gcode.sent": __plugin_implementation__.gcode_command_sent,
+        "octoprint.events.register_custom_events": register_custom_events
     }

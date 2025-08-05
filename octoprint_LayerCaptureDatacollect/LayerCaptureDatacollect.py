@@ -86,11 +86,20 @@ class LayerCaptureDatacollect(
     def on_event(self, event, payload):
         # Print lifecycle events
         if event == octoprint.events.Events.PRINT_STARTED:
-            self._logger.debug("Print started")
+            self._logger.debug("OnEvent: Print started")
         elif event in [octoprint.events.Events.PRINT_DONE, 
                       octoprint.events.Events.PRINT_FAILED, 
                       octoprint.events.Events.PRINT_CANCELLED]:
-            self._logger.info("Print finished")
+            self._logger.info("OnEvent: Print finished")
+        elif event == "layer_capture_event":
+            self._logger.info("OnEvent: Layer capture event received")
+            self._capture()
+        elif event == octoprint.events.Events.PRINT_PAUSED:
+            self._logger.info("OnEvent: Print paused")
+            print(payload)
+        elif event == octoprint.events.Events.PRINT_RESUMED:
+            self._logger.info("OnEvent: Print resumed")
+            print(payload)
 
     ##~~ Camera Methods
 
@@ -244,8 +253,7 @@ class LayerCaptureDatacollect(
     ##~~ GcodeCommandHook mixin - SIMPLE M240 IMPLEMENTATION
 
     def gcode_command_sent(self, comm_instance, phase, cmd, cmd_type, gcode, *args, **kwargs):
-        """Simple M240 capture hook"""
-        self._logger.debug(f"G-code command sent: {cmd}")
+        """Capture sequence detection and capture action"""
         try:
             line = cmd.strip().upper()
             
@@ -255,28 +263,24 @@ class LayerCaptureDatacollect(
                     z_value = line.split(";Z:")[1].strip()
                     self._detected_z_height = float(z_value)
                     self._logger.debug(f"Layer Z: {self._detected_z_height}mm")
-                except:
-                    pass
+                except Exception as e:
+                    self._logger.error(f"Failed to parse Z height: {e}")
             
             # Trigger capture on M240
             if "M240" in line:
                 self._logger.info("M240 detected - starting simple capture")
-                self._capture()
-                
+                self._event_bus.fire("layer_capture_event", {
+                    "trigger": "M240",
+                    "z_height": self._detected_z_height,
+                    "position": "Todo",
+                    "timestamp": time.time()
+                })
+            
+                    
         except Exception as e:
             self._logger.error(f"G-code hook error: {e}")
         
         return None
-
-    def get_current_position(self):
-        """Get the current position of the printer"""
-        current_data = self._printer.get_current_data()
-        self._logger.debug(f"Current data from the printer: {current_data}")
-        return {
-                'x': current_data.get('currentX', 0),
-                'y': current_data.get('currentY', 0), 
-                'z': current_data.get('currentZ', 0)
-            }
 
     def _capture(self):
         """Capture sequence"""
@@ -289,7 +293,7 @@ class LayerCaptureDatacollect(
             
             self._printer.pause_print()
             
-            pos_before_capture = self.get_current_position()
+            pos_before_capture = "TODO"
             self._logger.debug(f"Position before capture: {pos_before_capture}")
 
             # Simple Z lift (5mm above current layer)
@@ -332,7 +336,6 @@ class LayerCaptureDatacollect(
             self._logger.error(f"Simple capture failed: {e}")
 
     ##~~ Softwareupdate hook
-
     def get_update_information(self):
         return {
             "LayerCaptureDatacollect": {
@@ -346,17 +349,3 @@ class LayerCaptureDatacollect(
             }
         }
 
-
-# Plugin metadata
-__plugin_name__ = "Layer Capture Data Collect"
-__plugin_pythoncompat__ = ">=3,<4"
-
-def __plugin_load__():
-    global __plugin_implementation__
-    __plugin_implementation__ = LayerCaptureDatacollect()
-
-    global __plugin_hooks__
-    __plugin_hooks__ = {
-        "octoprint.plugin.softwareupdate.check_config": __plugin_implementation__.get_update_information,
-        "octoprint.comm.protocol.gcode.sent": __plugin_implementation__.gcode_command_sent
-    }

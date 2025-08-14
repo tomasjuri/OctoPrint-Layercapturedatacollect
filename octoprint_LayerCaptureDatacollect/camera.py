@@ -56,10 +56,13 @@ class Camera:
             # dst_meters = 0.05
             # self._camera.set_controls(
             # {"AfMode": controls.AfModeEnum.Manual, "LensPosition": 1/dst_meters})
-            self._camera.set_controls({"AfMode": controls.AfModeEnum.Auto})
+            
+            #self._camera.set_controls({"AfMode": controls.AfModeEnum.Auto})
             
             self._camera_type = "Picamera2"
             self._logger.info("Real camera initialized")
+            
+            self._camera_available = True
             return True
             
         except ImportError:
@@ -80,21 +83,27 @@ class Camera:
     def capture_image(self, autofocus=True):
         """Capture an image"""
         if not self._camera_available:
-            raise Exception("Camera not available")
+            raise Exception("Capture failed")
         
-        if self._settings.get(["fake_camera_mode"]):
+        if self._fake_camera_mode:
             return self._generate_fake_image()
         else:
             return self._capture_real_image(autofocus)
             
     def _capture_real_image(self, autofocus=True):
         """Capture image from real camera"""
+        start_time = time.time()
         try:
             if autofocus:
                 self._camera.autofocus_cycle()
                 
             image_array = self._camera.capture_array("main")
+            image_array = image_array[:, :, ::-1]  # Reverse the last dimension (channels)
             image = Image.fromarray(image_array)
+            
+            end_time = time.time()
+            self._logger.info(f"Image captured in {end_time - start_time} seconds")
+            
             return image
             
         except Exception as e:
@@ -129,18 +138,42 @@ class Camera:
         """Clean up camera resources"""
         try:
             if self._camera and self._camera_type == "Picamera2":
+                # Stop the camera first
                 self._camera.stop()
+                
+                # Wait a moment for the camera to fully stop
+                time.sleep(0.5)
+                
+                # Close the camera
                 self._camera.close()
+                
+                # Reset camera state
                 self._camera = None
+                self._camera_available = False
+                self._camera_type = "none"
+                
+                self._logger.info("Camera cleanup completed successfully")
+                
         except Exception as e:
             self._logger.warning(f"Error cleaning up camera: {e}")
+        finally:
+            # Ensure camera state is reset even if cleanup fails
+            self._camera = None
+            self._camera_available = False
+            self._camera_type = "none"
 
+
+    def __del__(self):
+        self.cleanup()
 
 def main():
     camera = Camera()
     camera.initialize()
+    print("Camera initialized")
     image = camera.capture_image()
+    print("Image captured")
     print(image)
+    image.save("test.jpg")
 
 if __name__ == "__main__":
     main()

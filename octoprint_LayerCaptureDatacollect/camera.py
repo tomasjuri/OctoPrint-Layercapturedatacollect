@@ -174,6 +174,7 @@ def main():
     print("Image captured")
     print(image)
     image.save("test.jpg")
+    camera.cleanup()
 
 if __name__ == "__main__":
     main()

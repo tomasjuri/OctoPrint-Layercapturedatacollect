@@ -28,6 +28,7 @@ class Camera:
         self._size = size
         self._camera_available = False
         self._camera_type = "none"
+        self._focused = False
         self._camera = None
 
     def initialize(self):
@@ -64,10 +65,10 @@ class Camera:
             elif self._focus_mode == "continuous":
                 self._camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
                 self._logger.info("Autofocus mode set to Continuous")
-            succ = self._camera.autofocus_cycle()
-            if not succ:
+            
+            self._focused = self._camera.autofocus_cycle()
+            if not self._focused:
                 self._logger.warning("Autofocus cycle failed")
-                return False
 
             self._camera_type = "Picamera2"
             self._logger.info("Real camera initialized")
@@ -108,9 +109,9 @@ class Camera:
         """Capture image from real camera"""
         start_time = time.time()
         try:
-            if self._focus_mode == "auto":
-                succ = self._camera.autofocus_cycle()
-                if not succ:
+            if self._focus_mode == "auto" or not self._focused:
+                self._focused = self._camera.autofocus_cycle()
+                if not self._focused:
                     self._logger.warning("Autofocus cycle failed")
                 
             image_array = self._camera.capture_array("main")

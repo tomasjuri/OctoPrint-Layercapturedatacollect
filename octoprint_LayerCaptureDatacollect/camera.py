@@ -8,17 +8,18 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from picamera2 import Picamera2
 from libcamera import controls
+import traceback
+
 
 class Camera:
     """Manages camera operations for layer capture plugin"""
     
-    def __init__(self, logger=None, fake_camera_mode=False, 
+    def __init__(self, fake_camera_mode=False, 
                  focus_mode="manual", focus_distance=0.06, 
                  size=(4608, 2592)):
         """Initialize camera system"""
 
-        self._logger = logger or logging.getLogger(__name__)
-        self._logger.setLevel(logging.DEBUG)
+        self._logger = logging.getLogger(__name__)
 
         self._fake_camera_mode = fake_camera_mode
         self._focus_mode = focus_mode
@@ -76,11 +77,13 @@ class Camera:
             self._camera_available = True
             return True
             
-        except ImportError:
+        except ImportError as e:
             self._logger.warning("Picamera2 not available")
+            traceback.print_stack()
             return False
         except Exception as e:
             self._logger.error(f"Failed to initialize real camera: {e}")
+            traceback.print_stack()
             return False
             
     def is_available(self):

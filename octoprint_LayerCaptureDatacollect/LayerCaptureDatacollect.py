@@ -12,6 +12,7 @@ import logging
 import time
 import json
 from datetime import datetime
+import random
 
 from .camera import Camera
 
@@ -43,7 +44,7 @@ class LayerCaptureDatacollect(
         self._logger.info("Layer Capture Data Collect plugin starting up")
         self._logger.debug("Layer Capture Data Collect plugin starting up")
         # Initialize camera system
-        self._camera = Camera(self._settings, self._logger)
+        self._camera = Camera() # TODO: add settings for fake camera mode, focus mode, focus distance, size
         self._camera.initialize()
         
         # Ensure save directory exists
@@ -79,7 +80,6 @@ class LayerCaptureDatacollect(
         }
 
     ##~~ TemplatePlugin mixin
-
     def get_template_configs(self):
         return [
             {
@@ -89,7 +89,6 @@ class LayerCaptureDatacollect(
         ]
 
     ##~~ EventHandlerPlugin mixin
-
     def on_event(self, event, payload):
         # Print lifecycle events
         if event == octoprint.events.Events.PRINT_STARTED:
@@ -105,8 +104,9 @@ class LayerCaptureDatacollect(
             self._capture_in_progress = False
             self._original_position = None
         elif event == "layer_capture_event":
-            self._logger.debug(f"Layer capture event received: {payload}")
-            self._capture(payload)
+            # self._logger.debug(f"Layer capture event received: {payload}")
+            # self._capture(payload)
+            pass
 
         elif event == octoprint.events.Events.PRINT_PAUSED:
             pass
@@ -117,7 +117,6 @@ class LayerCaptureDatacollect(
 
 
     ##~~ File Management
-
     def _get_save_path(self):
         """Get the configured save path"""
         save_path = self._settings.get(["save_path"])
@@ -136,9 +135,6 @@ class LayerCaptureDatacollect(
             self._logger.error(f"Failed to create save directory: {e}")
             return None
 
-    ##~~ GcodeCommandHook mixin - SIMPLE M240 IMPLEMENTATION
-
-    def gcode_received(self, comm_instance, line, *args, **kwargs):
         """Handle gcode responses from printer, especially M114 position reports"""
         # Look for M114 response: "X:123.45 Y:67.89 Z:12.34 E:45.67"
         if "X:" in line and "Y:" in line and "Z:" in line:
@@ -153,7 +149,7 @@ class LayerCaptureDatacollect(
                 
                 if 'x' in position and 'y' in position and 'z' in position:
                     self._last_m114_position = position
-                    self._logger.debug(f"Updated M114 position: {position}")
+                    # self._logger.debug(f"Updated M114 position: {position}")
             except Exception as e:
                 self._logger.warning(f"Failed to parse M114 response '{line}': {e}")
         return line
@@ -165,43 +161,19 @@ class LayerCaptureDatacollect(
         # detect:
         # M240 Z[layer_z] ZN[layer_num] MIN0[first_layer_print_min_0] MAX0[first_layer_print_max_0] MIN1[first_layer_print_min_1] MAX1[first_layer_print_max_1]    ; Start layer capture sequence
 
-        try:
-            # Trigger capture on M240
-            if "M240" in line:
-                self._logger.debug("1. M240 detected")
-                
-                # get variables from the command
-                layer_z = re.search(r'Z\s*([+-]?\d*\.?\d+)', line).group(1)
-                layer_num = re.search(r'ZN\s*([+-]?\d*\.?\d+)', line).group(1)
-                first_layer_print_min_0 = re.search(r'MIN0\s*([+-]?\d*\.?\d+)', line).group(1)
-                first_layer_print_max_0 = re.search(r'MAX0\s*([+-]?\d*\.?\d+)', line).group(1)
-                first_layer_print_min_1 = re.search(r'MIN1\s*([+-]?\d*\.?\d+)', line).group(1)
-                first_layer_print_max_1 = re.search(r'MAX1\s*([+-]?\d*\.?\d+)', line).group(1)
-                
-                self._logger.debug(f"Gcode command received: {line}")
-                self._logger.debug(f"Layer z: {layer_z}")
-                self._logger.debug(f"Layer num: {layer_num}")
-                self._logger.debug(f"First layer print min 0: {first_layer_print_min_0}")
-                self._logger.debug(f"First layer print max 0: {first_layer_print_max_0}")
-                self._logger.debug(f"First layer print min 1: {first_layer_print_min_1}")
-                self._logger.debug(f"First layer print max 1: {first_layer_print_max_1}")
+        
+        # Trigger capture on M240
+        if "M240" in line:
+            self._logger.debug("1. M240 detected")
             
-                self._event_bus.fire("layer_capture_event", {
-                    "trigger": "M240",
-                    "z_height": layer_z,
-                    "layer_num": layer_num,
-                    "first_layer_print_min_0": first_layer_print_min_0,
-                    "first_layer_print_max_0": first_layer_print_max_0,
-                    "first_layer_print_min_1": first_layer_print_min_1,
-                    "first_layer_print_max_1": first_layer_print_max_1,
-                    "timestamp": time.time()
-                })
-                self._logger.debug("4. layer_capture_event fired")
+            # get variables from the command
+            layer_z = re.search(r'Z\s*([+-]?\d*\.?\d+)', line).group(1)
+            layer_num = re.search(r'ZN\s*([+-]?\d*\.?\d+)', line).group(1)
+            self._logger.debug(f"Gcode command received: {line}")
+            self._logger.debug(f"Layer z: {layer_z}")
+            self._logger.debug(f"Layer num: {layer_num}")
             
-                    
-        except Exception as e:
-            self._logger.error(f"G-code hook error: {e}")
-        return None
+            self._do_capture_sequence(layer_z, layer_num)
 
 
 
@@ -234,93 +206,42 @@ class LayerCaptureDatacollect(
         self._logger.warning(f"M114 timeout, using fallback: {fallback_position}")
         return fallback_position
 
-    def _capture(self, payload):
-        """Capture sequence with improved M114 position tracking"""
-        self._logger.info("Camera capture sequence started")
-        
-        if self._capture_in_progress:
-            self._logger.warning("Capture already in progress, skipping")
-            return
-            
-        try:
-            # Skip if not printing or no camera
-            if not self._printer.is_printing() or not self._camera or not self._camera.is_available():
-                self._logger.info("Skipping capture - not printing or no camera")
-                return
-            
-            self._capture_in_progress = True
-            
-            # Get current position using M114 for accuracy
-            self._logger.info("Getting current position before pause...")
-            original_position = self.get_current_position()
-            self._logger.debug(f"Position inside capture: {original_position}")
-            
-            if original_position and original_position.get('x') is not None:
-                self._original_position = original_position
-                self._logger.info(f"Captured original position: {self._original_position}")
-            else:
-                self._logger.error("Failed to get current position - aborting capture")
-                return
-            
-            # Now pause the print
-            self._logger.info("Pausing print for capture...")
-            
-            # Generate capture positions (grid or single point)
-            self._capture_positions = self._generate_capture_positions()
-            
-            captured_images = []
-            
-            # Perform captures at each position
-            for i, capture_pos in enumerate(self._capture_positions):
-                try:
-                    self._logger.info(f"Moving to capture position {i+1}/{len(self._capture_positions)}: {capture_pos}")
-                    
-                    # Move to capture position
-                    move_cmd = f"G1 X{capture_pos['x']} Y{capture_pos['y']} Z{capture_pos['z']} F3000"
-                    self._printer.commands(move_cmd)
-                    
-                    # Wait for movement to complete
-                    self._wait_for_movement_completion()
-                    
-                    # Capture image
-                    image_data = self._camera.capture_image(capture_pos)
-                    
-                    # Save image with metadata
-                    if image_data:
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"m240_capture_{timestamp}_pos_{i:02d}.jpg"
-                        save_path = self._get_save_path()
-                        
-                        with open(os.path.join(save_path, filename), 'wb') as f:
-                            f.write(image_data)
-                        
-                        captured_images.append({
-                            'filename': filename,
-                            'position': capture_pos,
-                            'index': i
-                        })
-                        
-                        self._logger.info(f"Image saved: {filename}")
-                    
-                except Exception as e:
-                    self._logger.error(f"Failed to capture at position {i}: {e}")
-            
-            # Save capture session metadata
-            self._save_capture_metadata(captured_images)
-            
-            # Return to original position and resume
-            self._return_to_original_position_and_resume()
-        
-        except Exception as e:
-            self._logger.error(f"Capture sequence failed: {e}")
-            # Ensure we try to resume even if capture failed
-            try:
-                self._printer.resume_print()
-            except Exception as resume_error:
-                self._logger.error(f"Failed to resume print after error: {resume_error}")
-        finally:
-            self._capture_in_progress = False
+    def _do_capture_sequence(self, layer_z, layer_num):
+        """Do the capture sequence"""
+        self._logger.debug(f"Doing capture sequence for layer {layer_num} at z {layer_z}")
+        img = None
 
+        if self._printer.set_job_on_hold(True):
+            EXTRUDE_AMOUNT = 0.7
+            EXTRUDE_SPEED = 5000
+            self._printer.extrude(-EXTRUDE_AMOUNT, speed=EXTRUDE_SPEED)
+            self._logger.debug("Extruded -0.7mm")
+            random_range = (-10, 10)
+            position = {"x": -75 + random.randint(random_range[0], random_range[1]),
+                        "y": 18 + random.randint(random_range[0], random_range[1]),
+                        "z": 60 + random.randint(random_range[0], random_range[1])}
+            position_reverse = {"x":-position["x"],
+                                "y":-position["y"],
+                                "z":-position["z"]}
+
+            self._logger.debug(f"Jogging to {position}")
+            self._printer.jog(position, relative=True, speed=5000)
+            img = self._camera.capture_image()
+            self._logger.debug("Captured image: {img.shape}")
+            # img save to save_path
+            save_path = self._get_save_path()
+            img.save(os.path.join(save_path, f"layer_{layer_num}_capture.jpg"))
+            self._logger.debug(f"Saved image to {os.path.join(save_path, f'layer_{layer_num}_capture.jpg')}")
+            
+
+            self._printer.jog(position_reverse, relative=True, speed=5000)
+            self._printer.extrude(EXTRUDE_AMOUNT, speed=EXTRUDE_SPEED)        
+            
+            self._printer.set_job_on_hold(False)
+            self._logger.debug("Job resumed")
+            return
+                
+                
     def _generate_capture_positions(self):
         """Generate capture positions based on settings"""
         # For now, simple single position - can be expanded to grid later

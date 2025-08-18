@@ -1,4 +1,8 @@
 
+G60 ; save position
+
+
+
 ; Retract filament before pause to prevent oozing
 G91                    ; Relative positioning
 G1 E-20 F14000          ; Retract 20mm at 1800mm/min

@@ -6,9 +6,32 @@ import io
 import time
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
-from picamera2 import Picamera2
-from libcamera import controls
 import traceback
+import requests
+
+SNAPSHOT_URL = "http://127.0.0.1:8080/?action=snapshot"
+
+def capture_from_octoprint_stream(snapshot_url=SNAPSHOT_URL, timeout=5):
+    """
+    Capture an image from OctoPrint's webcam stream and return as PIL Image
+    """
+    try:
+        # Get the snapshot from OctoPrint's webcam endpoint
+        response = requests.get(snapshot_url, timeout=timeout, stream=True)
+        response.raise_for_status()
+        
+        if 'image' not in response.headers.get('content-type', ''):
+            raise ValueError("Response is not an image")
+        
+        # Create PIL Image directly from response content
+        image = Image.open(io.BytesIO(response.content))
+        # Convert to RGB if necessary (some formats might be in different modes)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        return image
+    except Exception as e:
+        raise Exception(f"Failed to capture from webcam stream: {e}")
 
 
 class Camera:
@@ -34,58 +57,13 @@ class Camera:
 
     def initialize(self):
         """Initialize camera system"""
-        try:
-            if self._fake_camera_mode:
-                self._logger.info("Fake camera mode enabled")
-                self._camera_type = "fake"
-                self._camera_available = True
-            else:
-                # Try to initialize real camera
-                self._camera_available = self._init_real_camera()
-        except Exception as e:
-            self._logger.error(f"Failed to initialize camera: {e}")
-            self._camera_available = False
+        self._logger.info("Fake camera mode enabled")
+        self._camera_type = "fake"
+        self._camera_available = True
+        
+        return self._camera_available
     
-
-    def _init_real_camera(self):
-        """Initialize real camera"""
-        try:
-            self._camera = Picamera2()
-            config = self._camera.create_still_configuration(
-                main={"format": "RGB888", "size": self._size})
-            self._camera.configure(config)
-            self._camera.start()
-
-            if self._focus_mode == "auto":
-                self._camera.set_controls({"AfMode": controls.AfModeEnum.Auto})
-                self._logger.info("Autofocus mode set to Auto")
-            elif self._focus_mode == "manual":
-                self._camera.set_controls({"AfMode": controls.AfModeEnum.Manual,
-                                           "LensPosition": 1/self._focus_distance})
-                self._logger.info("Autofocus mode set to Manual")
-            elif self._focus_mode == "continuous":
-                self._camera.set_controls({"AfMode": controls.AfModeEnum.Continuous})
-                self._logger.info("Autofocus mode set to Continuous")
-            
-            self._focused = self._camera.autofocus_cycle()
-            if not self._focused:
-                self._logger.warning("Autofocus cycle failed")
-
-            self._camera_type = "Picamera2"
-            self._logger.info("Real camera initialized")
-            
-            self._camera_available = True
-            return True
-            
-        except ImportError as e:
-            self._logger.warning("Picamera2 not available")
-            traceback.print_stack()
-            return False
-        except Exception as e:
-            self._logger.error(f"Failed to initialize real camera: {e}")
-            traceback.print_stack()
-            return False
-            
+       
     def is_available(self):
         """Check if camera is available"""
         return self._camera_available
@@ -95,91 +73,15 @@ class Camera:
         return self._camera_type
         
     def capture_image(self):
-        """Capture an image"""
-        if not self._camera_available:
-            raise Exception("Capture failed")
-        
-        if self._fake_camera_mode:
-            return self._generate_fake_image()
-        else:
-            return self._capture_real_image()
-
-# capteure times:
-# 4608x2592 1.525618553161621 seconds
-# 2304x1296 0.5843167304992676 seconds
-
-    def _capture_real_image(self):
-        """Capture image from real camera"""
-        start_time = time.time()
-        try:
-            if self._focus_mode == "auto" or not self._focused:
-                self._focused = self._camera.autofocus_cycle()
-                if not self._focused:
-                    self._logger.warning("Autofocus cycle failed")
-                
-            image_array = self._camera.capture_array("main")
-            image_array = image_array[:, :, ::-1]  # Reverse the last dimension (channels)
-            image = Image.fromarray(image_array)
-            
-            end_time = time.time()
-            self._logger.info(f"Image captured in {end_time - start_time} seconds")
-            
-            return image
-            
-        except Exception as e:
-            self._logger.error(f"Failed to capture real image: {e}")
-            raise
-            
-    def _generate_fake_image(self):
-        """Generate a fake camera image for testing"""
-        try:
-            # Create simple test image
-            width, height = self._size
-            image = Image.new('RGB', (width, height), color='lightblue')
-            draw = ImageDraw.Draw(image)
-            
-            # Draw center crosshairs
-            center_x, center_y = width // 2, height // 2
-            cross_size = 20
-            draw.line([(center_x - cross_size, center_y), (center_x + cross_size, center_y)], 
-                     fill=(255, 0, 0), width=2)
-            draw.line([(center_x, center_y - cross_size), (center_x, center_y + cross_size)], 
-                     fill=(255, 0, 0), width=2)
-            
-            return image
-            
-        except Exception as e:
-            self._logger.error(f"Failed to generate fake image: {e}")
-            raise
+        """Capture an image and return PIL Image"""
+        image = capture_from_octoprint_stream()
+        self._logger.info("Image captured from OctoPrint stream")
+        return image
+    
             
     def cleanup(self):
         """Clean up camera resources"""
-        try:
-            if self._camera and self._camera_type == "Picamera2":
-                # Stop the camera first
-                self._camera.stop()
-                
-                # Wait a moment for the camera to fully stop
-                time.sleep(0.5)
-                
-                # Close the camera
-                self._camera.close()
-                
-                # Reset camera state
-                self._camera = None
-                self._camera_available = False
-                self._camera_type = "none"
-                
-                self._logger.info("Camera cleanup completed successfully")
-                
-        except Exception as e:
-            self._logger.warning(f"Error cleaning up camera: {e}")
-        finally:
-            # Ensure camera state is reset even if cleanup fails
-            self._camera = None
-            self._camera_available = False
-            self._camera_type = "none"
-
+        pass
 
     def __del__(self):
         self.cleanup()
@@ -188,17 +90,12 @@ def main():
     # Simple console logging setup
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     
-    size = (4608, 2592)
-    focus_mode = "manual"
-    focus_distance = 0.06
-    camera = Camera(
-        size=size, focus_mode=focus_mode, focus_distance=focus_distance)
+    camera = Camera()
     camera.initialize()
     print("Camera initialized")
-    image = camera.capture_image()
-    print("Image captured")
-    print(image)
-    image.save("test.jpg")
+    img = camera.capture_image()
+    print(img.size)
+    img.save("test_capture.jpg")
     camera.cleanup()
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ import time
 import json
 from datetime import datetime
 import random
+import threading
 
 from .camera import Camera
 
@@ -43,6 +44,11 @@ class LayerCaptureDatacollect(
         self._waiting_for_position = False
         self._last_m114_position = None
         self._timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Movement synchronization
+        self._position_event = threading.Event()
+        self._position_response = None
+        self._movement_timeout = 30.0  # 30 second timeout for movements
         
         self._logger.info("Layer Capture Data Collect plugin initialized")
 
@@ -141,11 +147,116 @@ class LayerCaptureDatacollect(
             # get variables from the command
             layer_z = re.search(r'Z\s*([+-]?\d*\.?\d+)', line).group(1)
             layer_num = re.search(r'ZN\s*([+-]?\d*\.?\d+)', line).group(1)
-            self._logger.debug(f"Gcode command received: {line}")
+            self._logger.debug(f"Gcode command sent to printer: {line}")
             self._logger.debug(f"Layer z: {layer_z}")
             self._logger.debug(f"Layer num: {layer_num}")
             
             self._do_capture_sequence(layer_z, layer_num)
+
+    def gcode_received(self, comm_instance, line, *args, **kwargs):
+        """Handle G-code responses from printer, specifically M114 position responses"""
+        # self._logger.debug(f"Gcode received: {line}")
+        
+        position = {
+            "x": None,
+            "y": None,
+            "z": None,
+            "e": None
+        }
+
+        pos_re = r'^ok X:(\d+\.\d+) Y:(\d+\.\d+) Z:(\d+\.\d+) E:(\d+\.\d+) Count: A:'
+        pos_matched = re.search(pos_re, line)
+        if pos_matched:
+            position["x"] = float(pos_matched.group(1))
+            position["y"] = float(pos_matched.group(2))
+            position["z"] = float(pos_matched.group(3))
+            position["e"] = float(pos_matched.group(4))
+            
+            self._logger.debug(f"Position received: X: {position['x']}, Y: {position['y']}, Z: {position['z']}, E: {position['e']}")
+
+        if self._waiting_for_position and pos_matched:
+            self._logger.debug(f"Received position response: {line}")
+            try:
+                self._position_response = position
+                self._waiting_for_position = False
+                self._position_event.set()
+                self._logger.debug(f"Position parsed: {position}")
+            except Exception as e:
+                self._logger.error(f"Error parsing position response: {e}")
+                self._position_response = None
+                self._waiting_for_position = False
+                self._position_event.set()
+        
+        return line
+
+    def _send_gcode_and_wait_for_completion(self, gcode_commands, timeout=None):
+        """Send G-code commands and wait for movement completion using M400/M114"""
+        if timeout is None:
+            timeout = self._movement_timeout
+            
+        self._logger.debug(f"Sending G-code commands: {gcode_commands}")
+        
+        # Clear any previous position response
+        self._position_event.clear()
+        self._position_response = None
+        self._waiting_for_position = True
+        
+        try:
+            # Send the movement commands
+            for cmd in gcode_commands:
+                self._printer.commands([cmd])
+            
+            # Send M400 (wait for moves to finish) and M114 (get position)
+            self._printer.commands(["M400", "M114"])
+            
+            # Wait for position response
+            if self._position_event.wait(timeout):
+                self._logger.debug("Movement completed successfully")
+                return self._position_response
+            else:
+                self._logger.error(f"Movement timeout after {timeout} seconds")
+                return None
+                
+        except Exception as e:
+            self._logger.error(f"Error during synchronized movement: {e}")
+            return None
+        finally:
+            self._waiting_for_position = False
+
+    def _move_to_absolute_position(self, x, y, z, speed=None):
+        """Move to absolute position using synchronized G-code commands"""
+        gcode_commands = []
+        
+        # Set to absolute positioning
+        gcode_commands.append("G90")
+        
+        # Build movement command
+        move_cmd = f"G0 X{x} Y{y} Z{z}"
+        if speed:
+            move_cmd += f" F{speed}"
+        
+        gcode_commands.append(move_cmd)
+        
+        return self._send_gcode_and_wait_for_completion(gcode_commands)
+
+    def _move_relative(self, x, y, z, speed=None):
+        """Move relative using synchronized G-code commands"""
+        gcode_commands = []
+        
+        # Set to relative positioning  
+        gcode_commands.append("G91")
+        
+        # Build movement command
+        move_cmd = f"G0 X{x} Y{y} Z{z}"
+        if speed:
+            move_cmd += f" F{speed}"
+        
+        gcode_commands.append(move_cmd)
+        
+        # Return to absolute positioning (safer default)
+        gcode_commands.append("G90")
+        
+        return self._send_gcode_and_wait_for_completion(gcode_commands)
 
     def _generate_capture_metadata(self, layer_num, layer_z, position_relative, img):
         """Generate capture metadata"""
@@ -157,46 +268,98 @@ class LayerCaptureDatacollect(
         return metadata
 
     def _do_capture_sequence(self, layer_z, layer_num):
-        """Do the capture sequence"""
+        """Do the capture sequence with proper movement synchronization"""
         self._logger.debug(f"Doing capture sequence for layer {layer_num} at z {layer_z}")
-        img = None
-
-        if self._printer.set_job_on_hold(True):
-            EXTRUDE_AMOUNT = 0.7
-            EXTRUDE_SPEED = 5000
-            # self._printer.extrude(-EXTRUDE_AMOUNT, speed=EXTRUDE_SPEED)
-            self._logger.debug("Extruded -0.7mm")
-            random_range = (-10, 10)
-            position = {"x": CAM_X_OFFSET + random.randint(random_range[0], random_range[1]),
-                        "y": CAM_Y_OFFSET + random.randint(random_range[0], random_range[1]),
-                        "z": CAM_Z_OFFSET + random.randint(random_range[0], random_range[1])}
-            position_reverse = {"x":-position["x"],
-                                "y":-position["y"],
-                                "z":-position["z"]}
-
-            self._logger.debug(f"Jogging to {position}")
-            self._printer.jog(position, relative=True, speed=5000)
+        
+        if not self._printer.set_job_on_hold(True):
+            self._logger.error("Failed to pause print job")
+            return
             
-            time.sleep(3)
+        try:
+            # Get current position first
+            self._logger.debug("Getting current position and sending")
+            current_pos = self._send_gcode_and_wait_for_completion(["M114"])
+            if current_pos is None:
+                self._logger.error("Failed to get current position")
+                return
+                
+            self._logger.debug(f"Current position: {current_pos}")
+            
+            # Retract extruder to prevent oozing
+            EXTRUDE_AMOUNT = 0.7
+            EXTRUDE_SPEED = 1800  # F1800 = 30mm/s typical retraction speed
+            retract_gcode = [
+                "M83",  # Set extruder to relative mode
+                f"G1 E-{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Retract
+            ]
+            self._logger.debug("Retracting extruder...")
+            if self._send_gcode_and_wait_for_completion(retract_gcode) is None:
+                self._logger.error("Failed to retract extruder")
+                return
+            
+            # Calculate absolute target position
+            random_range = (-10, 10)
+            target_x = current_pos['x'] + CAM_X_OFFSET + random.randint(random_range[0], random_range[1])
+            target_y = current_pos['y'] + CAM_Y_OFFSET + random.randint(random_range[0], random_range[1])  
+            target_z = current_pos['z'] + CAM_Z_OFFSET + random.randint(random_range[0], random_range[1])
+            
+            self._logger.debug(f"Moving to capture position: X{target_x} Y{target_y} Z{target_z}")
+            
+            # Move to capture position with synchronized movement
+            capture_pos = self._move_to_absolute_position(target_x, target_y, target_z, speed=5000)
+            if capture_pos is None:
+                self._logger.error("Failed to move to capture position")
+                return
+                
+            # Capture image
+            self._logger.debug("Capturing image...")
             img = self._camera.capture_image()
             self._logger.debug(f"Captured image: {img.size}")
+            
+            # Save image and metadata
             img_path = os.path.join(self._save_path, f"layer_{layer_num}_img.jpg")
             meta_path = os.path.join(self._save_path, f"layer_{layer_num}_meta.json")
             
             img.save(img_path)
             self._logger.debug(f"Saved image to {img_path}")
+            
+            # Calculate relative position for metadata
+            position_relative = {
+                "x": target_x - current_pos['x'],
+                "y": target_y - current_pos['y'], 
+                "z": target_z - current_pos['z']
+            }
+            
             gen_metadata = self._generate_capture_metadata(
-                layer_num, layer_z, position, img)
+                layer_num, layer_z, position_relative, img)
             with open(meta_path, "w") as f:
                 json.dump(gen_metadata, f)
             self._logger.debug(f"Saved metadata to {meta_path}")
 
-            self._printer.jog(position_reverse, relative=True, speed=5000)
-            # self._printer.extrude(EXTRUDE_AMOUNT, speed=EXTRUDE_SPEED)        
+            # Return to original position
+            self._logger.debug(f"Returning to original position: X{current_pos['x']} Y{current_pos['y']} Z{current_pos['z']}")
+            return_pos = self._move_to_absolute_position(
+                current_pos['x'], current_pos['y'], current_pos['z'], speed=5000)
+            if return_pos is None:
+                self._logger.error("Failed to return to original position")
+                return
             
+            # Un-retract extruder
+            unretract_gcode = [
+                "M83",  # Ensure extruder is in relative mode
+                f"G1 E{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Un-retract
+            ]
+            self._logger.debug("Un-retracting extruder...")
+            if self._send_gcode_and_wait_for_completion(unretract_gcode) is None:
+                self._logger.error("Failed to un-retract extruder")
+                return
+                
+        except Exception as e:
+            self._logger.error(f"Error during capture sequence: {e}")
+        finally:
+            # Always resume the print job
             self._printer.set_job_on_hold(False)
             self._logger.debug("Job resumed")
-            return
                 
                 
     

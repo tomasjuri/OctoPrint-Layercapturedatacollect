@@ -271,95 +271,93 @@ class LayerCaptureDatacollect(
         """Do the capture sequence with proper movement synchronization"""
         self._logger.debug(f"Doing capture sequence for layer {layer_num} at z {layer_z}")
         
-        if not self._printer.set_job_on_hold(True):
-            self._logger.error("Failed to pause print job")
-            return
-            
-        try:
-            # Get current position first
-            self._logger.debug("Getting current position and sending")
-            current_pos = self._send_gcode_and_wait_for_completion(["M114"])
-            if current_pos is None:
-                self._logger.error("Failed to get current position")
-                return
+        with self._printer.job_on_hold(True):
+            self._logger.debug("Print job on hold")
+         
+            try:
+                # Get current position first
+                self._logger.debug("Getting current position and sending")
+                current_pos = self._send_gcode_and_wait_for_completion(["M114"])
+                if current_pos is None:
+                    self._logger.error("Failed to get current position")
+                    return
+                    
+                self._logger.debug(f"Current position: {current_pos}")
                 
-            self._logger.debug(f"Current position: {current_pos}")
-            
-            # Retract extruder to prevent oozing
-            EXTRUDE_AMOUNT = 0.7
-            EXTRUDE_SPEED = 1800  # F1800 = 30mm/s typical retraction speed
-            retract_gcode = [
-                "M83",  # Set extruder to relative mode
-                f"G1 E-{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Retract
-            ]
-            self._logger.debug("Retracting extruder...")
-            if self._send_gcode_and_wait_for_completion(retract_gcode) is None:
-                self._logger.error("Failed to retract extruder")
-                return
-            
-            # Calculate absolute target position
-            random_range = (-10, 10)
-            target_x = current_pos['x'] + CAM_X_OFFSET + random.randint(random_range[0], random_range[1])
-            target_y = current_pos['y'] + CAM_Y_OFFSET + random.randint(random_range[0], random_range[1])  
-            target_z = current_pos['z'] + CAM_Z_OFFSET + random.randint(random_range[0], random_range[1])
-            
-            self._logger.debug(f"Moving to capture position: X{target_x} Y{target_y} Z{target_z}")
-            
-            # Move to capture position with synchronized movement
-            capture_pos = self._move_to_absolute_position(target_x, target_y, target_z, speed=5000)
-            if capture_pos is None:
-                self._logger.error("Failed to move to capture position")
-                return
+                # Retract extruder to prevent oozing
+                EXTRUDE_AMOUNT = 0.7
+                EXTRUDE_SPEED = 1800  # F1800 = 30mm/s typical retraction speed
+                retract_gcode = [
+                    "M83",  # Set extruder to relative mode
+                    f"G1 E-{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Retract
+                ]
+                self._logger.debug("Retracting extruder...")
+                if self._send_gcode_and_wait_for_completion(retract_gcode) is None:
+                    self._logger.error("Failed to retract extruder")
+                    return
                 
-            # Capture image
-            self._logger.debug("Capturing image...")
-            img = self._camera.capture_image()
-            self._logger.debug(f"Captured image: {img.size}")
-            
-            # Save image and metadata
-            img_path = os.path.join(self._save_path, f"layer_{layer_num}_img.jpg")
-            meta_path = os.path.join(self._save_path, f"layer_{layer_num}_meta.json")
-            
-            img.save(img_path)
-            self._logger.debug(f"Saved image to {img_path}")
-            
-            # Calculate relative position for metadata
-            position_relative = {
-                "x": target_x - current_pos['x'],
-                "y": target_y - current_pos['y'], 
-                "z": target_z - current_pos['z']
-            }
-            
-            gen_metadata = self._generate_capture_metadata(
-                layer_num, layer_z, position_relative, img)
-            with open(meta_path, "w") as f:
-                json.dump(gen_metadata, f)
-            self._logger.debug(f"Saved metadata to {meta_path}")
+                # Calculate absolute target position
+                random_range = (-10, 10)
+                target_x = current_pos['x'] + CAM_X_OFFSET + random.randint(random_range[0], random_range[1])
+                target_y = current_pos['y'] + CAM_Y_OFFSET + random.randint(random_range[0], random_range[1])  
+                target_z = current_pos['z'] + CAM_Z_OFFSET + random.randint(random_range[0], random_range[1])
+                
+                self._logger.debug(f"Moving to capture position: X{target_x} Y{target_y} Z{target_z}")
+                
+                # Move to capture position with synchronized movement
+                capture_pos = self._move_to_absolute_position(target_x, target_y, target_z, speed=5000)
+                if capture_pos is None:
+                    self._logger.error("Failed to move to capture position")
+                    return
+                    
+                # Capture image
+                self._logger.debug("Capturing image...")
+                img = self._camera.capture_image()
+                self._logger.debug(f"Captured image: {img.size}")
+                
+                # Save image and metadata
+                img_path = os.path.join(self._save_path, f"layer_{layer_num}_img.jpg")
+                meta_path = os.path.join(self._save_path, f"layer_{layer_num}_meta.json")
+                
+                img.save(img_path)
+                self._logger.debug(f"Saved image to {img_path}")
+                
+                # Calculate relative position for metadata
+                position_relative = {
+                    "x": target_x - current_pos['x'],
+                    "y": target_y - current_pos['y'], 
+                    "z": target_z - current_pos['z']
+                }
+                
+                gen_metadata = self._generate_capture_metadata(
+                    layer_num, layer_z, position_relative, img)
+                with open(meta_path, "w") as f:
+                    json.dump(gen_metadata, f)
+                self._logger.debug(f"Saved metadata to {meta_path}")
 
-            # Return to original position
-            self._logger.debug(f"Returning to original position: X{current_pos['x']} Y{current_pos['y']} Z{current_pos['z']}")
-            return_pos = self._move_to_absolute_position(
-                current_pos['x'], current_pos['y'], current_pos['z'], speed=5000)
-            if return_pos is None:
-                self._logger.error("Failed to return to original position")
-                return
-            
-            # Un-retract extruder
-            unretract_gcode = [
-                "M83",  # Ensure extruder is in relative mode
-                f"G1 E{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Un-retract
-            ]
-            self._logger.debug("Un-retracting extruder...")
-            if self._send_gcode_and_wait_for_completion(unretract_gcode) is None:
-                self._logger.error("Failed to un-retract extruder")
-                return
+                # Return to original position
+                self._logger.debug(f"Returning to original position: X{current_pos['x']} Y{current_pos['y']} Z{current_pos['z']}")
+                return_pos = self._move_to_absolute_position(
+                    current_pos['x'], current_pos['y'], current_pos['z'], speed=5000)
+                if return_pos is None:
+                    self._logger.error("Failed to return to original position")
+                    return
                 
-        except Exception as e:
-            self._logger.error(f"Error during capture sequence: {e}")
-        finally:
-            # Always resume the print job
-            self._printer.set_job_on_hold(False)
-            self._logger.debug("Job resumed")
+                # Un-retract extruder
+                unretract_gcode = [
+                    "M83",  # Ensure extruder is in relative mode
+                    f"G1 E{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Un-retract
+                ]
+                self._logger.debug("Un-retracting extruder...")
+                if self._send_gcode_and_wait_for_completion(unretract_gcode) is None:
+                    self._logger.error("Failed to un-retract extruder")
+                    return
+                    
+            except Exception as e:
+                self._logger.error(f"Error during capture sequence: {e}")
+            finally:
+                # Always resume the print job
+                self._logger.debug("Job resumed")
                 
                 
     

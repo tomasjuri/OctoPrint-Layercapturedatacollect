@@ -18,8 +18,12 @@ $(function() {
             // Clean up when settings are hidden
         };
 
+        // Flag to prevent multiple initialization
+        self._settingsWatchersInitialized = false;
+
         // Settings change watchers for camera and paths
         self.setupSettingsWatchers = function() {
+            if (self._settingsWatchersInitialized) return;
             if (!self.settingsViewModel.settings.plugins.LayerCaptureDatacollect) return;
             
             var settings = self.settingsViewModel.settings.plugins.LayerCaptureDatacollect;
@@ -44,6 +48,8 @@ $(function() {
             settings.camera_resolution_y.subscribe(function(newValue) {
                 console.log("Camera resolution Y changed to:", newValue);
             });
+
+            self._settingsWatchersInitialized = true;
         };
 
         // Initialize when settings are loaded
@@ -52,11 +58,12 @@ $(function() {
             setTimeout(self.setupSettingsWatchers, 1000);
         };
 
-        // Settings events - consolidated to avoid duplicates
+        // Settings events
         self.onSettingsShown = function() {
-            setTimeout(function() {
-                self.setupSettingsWatchers();
-            }, 100);
+            // Only set up watchers if not already done
+            if (!self._settingsWatchersInitialized) {
+                setTimeout(self.setupSettingsWatchers, 100);
+            }
         };
 
 

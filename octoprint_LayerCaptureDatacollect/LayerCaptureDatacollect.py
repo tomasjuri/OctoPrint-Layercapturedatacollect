@@ -16,6 +16,7 @@ import random
 import threading
 
 from .camera import Camera
+from .camera_fake import CameraFake
 
 LAYER_CAPTURE_TRIGGER_MCODE = "M240"
 DEFAULT_SAVE_PATH = "~/.octoprint/uploads/layer_captures"
@@ -31,11 +32,12 @@ class LayerCaptureDatacollect(
     octoprint.plugin.EventHandlerPlugin,
     octoprint.plugin.StartupPlugin,
 ):
-
+    
     def __init__(self):    
         self._logger = logging.getLogger(__name__)
-        self._detected_z_height = 0.0
-        self._camera = None  # Will be initialized in on_after_startup
+        self._camera = None
+        self._capture_in_progress = False
+        self._job_on_hold = False
         
         # Position tracking for pause/resume
         self._capture_in_progress = False
@@ -50,13 +52,14 @@ class LayerCaptureDatacollect(
         self._position_response = None
         self._movement_timeout = 30.0  # 30 second timeout for movements
         
-        self._logger.info("Layer Capture Data Collect plugin initialized")
+        self._logger.info("Layer Capture Data Collect plugin initialized!")
 
     def on_after_startup(self):
         self._logger.info("Layer Capture Data Collect plugin starting up")
 
         # Initialize camera system
-        self._camera = Camera()
+        self._camera = CameraFake()
+        # self._camera = Camera()
         self._camera.initialize()
         
         # Ensure save directory exists
@@ -68,7 +71,6 @@ class LayerCaptureDatacollect(
         self._logger.info("Layer Capture Data Collect plugin shutting down")
         self._camera.cleanup()
 
-   
     def get_assets(self):
         return {
             "js": ["js/LayerCaptureDatacollect.js"],
@@ -76,7 +78,60 @@ class LayerCaptureDatacollect(
             "less": ["less/LayerCaptureDatacollect.less"]
         }
 
-    ##~~ TemplatePlugin mixin
+    def get_settings_defaults(self):
+        return {
+            # Plugin control
+            "enabled": True,
+            
+            # Grid configuration
+            "grid_center_x": 100.0,
+            "grid_center_y": 100.0,
+            "grid_spacing": 20,
+            "grid_size": 3,
+            "z_offset": 10.0,
+            
+            # Capture settings
+            "layer_interval": 5,
+            
+            # Safety boundaries
+            "min_x": 0.0,
+            "max_x": 200.0,
+            "min_y": 0.0,
+            "max_y": 200.0,
+            "max_z": 200.0,
+            
+            # Camera settings
+            "camera_enabled": True,
+            "image_format": "jpg",
+            "image_quality": 85,
+            "fake_camera_mode": True,
+            "camera_resolution_x": 1640,
+            "camera_resolution_y": 1232,
+            "camera_iso": 100,
+            "camera_rotation": 0,
+            "camera_shutter_speed": 0,
+            
+            # Advanced camera controls
+            "exposure_mode": "auto",
+            "white_balance_mode": "auto",
+            "brightness": 0.0,
+            "contrast": 1.0,
+            "saturation": 1.0,
+            "sharpness": 1.0,
+            "noise_reduction_mode": "auto",
+            "enable_image_processing": False,
+            "auto_enhance": False,
+            
+            # Advanced settings
+            "move_speed": 3000,
+            "capture_delay": 1.0,
+            "enable_movement": True,
+            
+            # File paths
+            "save_path": DEFAULT_SAVE_PATH,
+            "calibration_file_path": ""
+        }
+
     def get_template_configs(self):
         return [
             {
@@ -85,7 +140,6 @@ class LayerCaptureDatacollect(
             }
         ]
 
-    ##~~ EventHandlerPlugin mixin
     def on_event(self, event, payload):
         # Print lifecycle events
         if event == octoprint.events.Events.PRINT_STARTED:
@@ -110,10 +164,6 @@ class LayerCaptureDatacollect(
         elif event == octoprint.events.Events.PRINT_RESUMED:
             pass
 
-    ##~~ Camera Methods
-
-
-    ##~~ File Management
     def _get_save_path(self):
         """Get the configured save path"""
         save_path = self._settings.get(["save_path"])
@@ -134,35 +184,185 @@ class LayerCaptureDatacollect(
             self._logger.error(f"Failed to create save directory: {e}")
             return None
 
-    def gcode_command_sent(self, comm_instance, phase, cmd, cmd_type, gcode, *args, **kwargs):
-        """Capture sequence detection and capture action"""
+    def on_gcode_queuing(self, comm_instance, phase, cmd, cmd_type, gcode, *args, **kwargs):
+        """Intercept gcode before it's sent to printer"""
+        if not self._printer.is_printing():
+            return None
+            
         line = cmd.strip().upper()
-
-        # detect:
-        # M240 Z[layer_z] ZN[layer_num]; Start layer capture sequence
-        # Trigger capture on M240
-        if "M240" in line:
-            self._logger.debug("1. M240 detected")
-            
-            # get variables from the command
-            layer_z = re.search(r'Z\s*([+-]?\d*\.?\d+)', line).group(1)
-            layer_num = re.search(r'ZN\s*([+-]?\d*\.?\d+)', line).group(1)
-            self._logger.debug(f"Gcode command sent to printer: {line}")
-            self._logger.debug(f"Layer z: {layer_z}")
-            self._logger.debug(f"Layer num: {layer_num}")
-            
-            self._do_capture_sequence(layer_z, layer_num)
-
-    def gcode_received(self, comm_instance, line, *args, **kwargs):
-        """Handle G-code responses from printer, specifically M114 position responses"""
-        # self._logger.debug(f"Gcode received: {line}")
         
-        position = {
-            "x": None,
-            "y": None,
-            "z": None,
-            "e": None
+        # Detect M240 trigger
+        if "M240" in line:
+            self._logger.info("M240 detected, starting capture sequence")
+            
+            # Extract parameters
+            try:
+                layer_z = re.search(r'Z\s*([+-]?\d*\.?\d+)', line).group(1)
+                layer_num = re.search(r'ZN\s*([+-]?\d*\.?\d+)', line).group(1)
+            except:
+                self._logger.error("Failed to parse M240 parameters")
+                return None
+            
+            # Briefly set job on hold to suppress this command
+            if self._printer.set_job_on_hold(True):
+                self._logger.debug("Job on hold acquired")
+                
+                # Start capture in separate thread
+                thread = threading.Thread(
+                    target=self._do_capture_sequence_async, 
+                    args=[layer_z, layer_num, cmd]
+                )
+                thread.daemon = True
+                thread.start()
+                
+                # wait for the thread to finish
+                self._printer.set_job_on_hold(False)
+                self._logger.debug("Job hold released immediately")
+                
+                # Suppress the M240 command (we'll send it later)
+                return None,
+
+
+        
+        return None  # Let other commands pass through
+
+    def _do_capture_sequence_async(self, layer_z, layer_num, original_cmd):
+        """Execute capture sequence in separate thread - NO JOB HOLD"""
+        try:
+            self._logger.info(f"Starting capture sequence for layer {layer_num}")
+            
+            # Small delay to ensure the job hold release is processed
+            time.sleep(0.1)
+            
+            # Now we can send commands normally (job is not on hold)
+            current_pos = self._get_current_position_sync()
+            if current_pos is None:
+                self._logger.error("Failed to get current position")
+                return
+            else:
+                self._logger.debug(f"Current position received: {current_pos}")
+                
+            # Execute movement sequence
+            success = self._execute_movement_sequence(current_pos, layer_z, layer_num)
+            
+            if success:
+                # Send the original M240 command to continue the print
+                self._printer.commands([original_cmd], tags={'layer-capture-resume'})
+                self._logger.debug("Original M240 command sent to resume print")
+                
+        except Exception as e:
+            self._logger.error(f"Error in capture sequence: {e}")
+            # Send the original command anyway to continue the print
+            self._printer.commands([original_cmd], tags={'layer-capture-resume'})
+
+    def _get_current_position_sync(self):
+        """Get current position - job is NOT on hold here"""
+        self._position_event.clear()
+        self._position_response = None
+        self._waiting_for_position = True
+        
+        try:
+            # Send M400 (wait for moves) + M114 (get position) 
+            self._printer.commands(["M400", "M114"], tags={'layer-capture-position'})
+            
+            # Wait for position response with timeout
+            if self._position_event.wait(5.0):
+                return self._position_response
+            else:
+                self._logger.error("Position request timeout")
+                return None
+                
+        finally:
+            self._waiting_for_position = False
+
+    def _execute_movement_sequence(self, current_pos, layer_z, layer_num):
+        """Execute the movement and capture sequence - simplified version"""
+        try:
+            # Retract extruder
+            self._logger.debug("Retracting extruder...")
+            self._printer.commands([
+                "M83",  # Relative extruder mode
+                "G1 E-0.7 F1800",  # Retract
+                "M400"  # Wait for completion
+            ], tags={'layer-capture-retract'})
+            
+            # Small delay for retraction
+            time.sleep(0.1)
+            
+            # Calculate target position
+            target_x = current_pos['x'] + CAM_X_OFFSET + random.randint(-10, 10)
+            target_y = current_pos['y'] + CAM_Y_OFFSET + random.randint(-10, 10)
+            target_z = current_pos['z'] + CAM_Z_OFFSET + random.randint(-10, 10)
+            
+            # Move to capture position
+            self._logger.debug(f"Moving to capture position: X{target_x} Y{target_y} Z{target_z}")
+            self._printer.commands([
+                "G90",  # Absolute positioning
+                f"G0 X{target_x} Y{target_y} Z{target_z} F5000",
+                "M400"  # Wait for completion
+            ], tags={'layer-capture-move'})
+            
+            # Wait for movement and vibrations to settle
+            time.sleep(1.0)
+            
+            # Capture image
+            self._logger.debug("Capturing image...")
+            img = self._camera.capture_image()
+            self._logger.debug(f"Captured image: {img.size}")
+            
+            # Save image and metadata using existing methods
+            self._save_image_and_metadata(img, layer_num, layer_z, current_pos, target_x, target_y, target_z)
+            
+            # Return to original position
+            self._logger.debug(f"Returning to original position: X{current_pos['x']} Y{current_pos['y']} Z{current_pos['z']}")
+            self._printer.commands([
+                f"G0 X{current_pos['x']} Y{current_pos['y']} Z{current_pos['z']} F5000",
+                "M400"
+            ], tags={'layer-capture-return'})
+            
+            # Wait for return movement
+            time.sleep(0.5)
+            
+            # Un-retract extruder
+            self._logger.debug("Un-retracting extruder...")
+            self._printer.commands([
+                "M83",  # Relative extruder mode  
+                "G1 E0.7 F1800",  # Un-retract
+                "M400"
+            ], tags={'layer-capture-unretract'})
+            
+            return True
+            
+        except Exception as e:
+            self._logger.error(f"Movement sequence failed: {e}")
+            return False
+
+    def _save_image_and_metadata(self, img, layer_num, layer_z, current_pos, target_x, target_y, target_z):
+        """Save image and metadata - extracted from existing code"""
+        # Save image and metadata
+        img_path = os.path.join(self._save_path, f"layer_{layer_num}_img.jpg")
+        meta_path = os.path.join(self._save_path, f"layer_{layer_num}_meta.json")
+        
+        img.save(img_path)
+        self._logger.debug(f"Saved image to {img_path}")
+        
+        # Calculate relative position for metadata
+        position_relative = {
+            "x": target_x - current_pos['x'],
+            "y": target_y - current_pos['y'], 
+            "z": target_z - current_pos['z']
         }
+        
+        gen_metadata = self._generate_capture_metadata(
+            layer_num, layer_z, position_relative, img)
+        with open(meta_path, "w") as f:
+            json.dump(gen_metadata, f)
+        self._logger.debug(f"Saved metadata to {meta_path}")
+
+    # Keep your existing gcode_received method for position parsing
+    def gcode_received(self, comm_instance, line, *args, **kwargs):
+        """Handle position responses"""
+        position = {"x": None, "y": None, "z": None, "e": None}
 
         pos_re = r'^ok X:(\d+\.\d+) Y:(\d+\.\d+) Z:(\d+\.\d+) E:(\d+\.\d+) Count: A:'
         pos_matched = re.search(pos_re, line)
@@ -175,18 +375,9 @@ class LayerCaptureDatacollect(
             self._logger.debug(f"Position received: X: {position['x']}, Y: {position['y']}, Z: {position['z']}, E: {position['e']}")
 
         if self._waiting_for_position and pos_matched:
-            self._logger.debug(f"Received position response: {line}")
-            try:
-                self._position_response = position
-                self._waiting_for_position = False
-                self._position_event.set()
-                self._logger.debug(f"Position parsed: {position}")
-            except Exception as e:
-                self._logger.error(f"Error parsing position response: {e}")
-                self._position_response = None
-                self._waiting_for_position = False
-                self._position_event.set()
-        
+            self._waiting_for_position = False
+            self._position_event.set()
+            self._position_response = position
         return line
 
     def _send_gcode_and_wait_for_completion(self, gcode_commands, timeout=None):
@@ -266,98 +457,6 @@ class LayerCaptureDatacollect(
             "position_relative": position_relative,
             "img_shape": img.size}
         return metadata
-
-    def _do_capture_sequence(self, layer_z, layer_num):
-        """Do the capture sequence with proper movement synchronization"""
-        self._logger.debug(f"Doing capture sequence for layer {layer_num} at z {layer_z}")
-        
-        with self._printer.job_on_hold(True):
-            self._logger.debug("Print job on hold")
-         
-            try:
-                # Get current position first
-                self._logger.debug("Getting current position and sending")
-                current_pos = self._send_gcode_and_wait_for_completion(["M114"])
-                if current_pos is None:
-                    self._logger.error("Failed to get current position")
-                    return
-                    
-                self._logger.debug(f"Current position: {current_pos}")
-                
-                # Retract extruder to prevent oozing
-                EXTRUDE_AMOUNT = 0.7
-                EXTRUDE_SPEED = 1800  # F1800 = 30mm/s typical retraction speed
-                retract_gcode = [
-                    "M83",  # Set extruder to relative mode
-                    f"G1 E-{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Retract
-                ]
-                self._logger.debug("Retracting extruder...")
-                if self._send_gcode_and_wait_for_completion(retract_gcode) is None:
-                    self._logger.error("Failed to retract extruder")
-                    return
-                
-                # Calculate absolute target position
-                random_range = (-10, 10)
-                target_x = current_pos['x'] + CAM_X_OFFSET + random.randint(random_range[0], random_range[1])
-                target_y = current_pos['y'] + CAM_Y_OFFSET + random.randint(random_range[0], random_range[1])  
-                target_z = current_pos['z'] + CAM_Z_OFFSET + random.randint(random_range[0], random_range[1])
-                
-                self._logger.debug(f"Moving to capture position: X{target_x} Y{target_y} Z{target_z}")
-                
-                # Move to capture position with synchronized movement
-                capture_pos = self._move_to_absolute_position(target_x, target_y, target_z, speed=5000)
-                if capture_pos is None:
-                    self._logger.error("Failed to move to capture position")
-                    return
-                    
-                # Capture image
-                self._logger.debug("Capturing image...")
-                img = self._camera.capture_image()
-                self._logger.debug(f"Captured image: {img.size}")
-                
-                # Save image and metadata
-                img_path = os.path.join(self._save_path, f"layer_{layer_num}_img.jpg")
-                meta_path = os.path.join(self._save_path, f"layer_{layer_num}_meta.json")
-                
-                img.save(img_path)
-                self._logger.debug(f"Saved image to {img_path}")
-                
-                # Calculate relative position for metadata
-                position_relative = {
-                    "x": target_x - current_pos['x'],
-                    "y": target_y - current_pos['y'], 
-                    "z": target_z - current_pos['z']
-                }
-                
-                gen_metadata = self._generate_capture_metadata(
-                    layer_num, layer_z, position_relative, img)
-                with open(meta_path, "w") as f:
-                    json.dump(gen_metadata, f)
-                self._logger.debug(f"Saved metadata to {meta_path}")
-
-                # Return to original position
-                self._logger.debug(f"Returning to original position: X{current_pos['x']} Y{current_pos['y']} Z{current_pos['z']}")
-                return_pos = self._move_to_absolute_position(
-                    current_pos['x'], current_pos['y'], current_pos['z'], speed=5000)
-                if return_pos is None:
-                    self._logger.error("Failed to return to original position")
-                    return
-                
-                # Un-retract extruder
-                unretract_gcode = [
-                    "M83",  # Ensure extruder is in relative mode
-                    f"G1 E{EXTRUDE_AMOUNT} F{EXTRUDE_SPEED}"  # Un-retract
-                ]
-                self._logger.debug("Un-retracting extruder...")
-                if self._send_gcode_and_wait_for_completion(unretract_gcode) is None:
-                    self._logger.error("Failed to un-retract extruder")
-                    return
-                    
-            except Exception as e:
-                self._logger.error(f"Error during capture sequence: {e}")
-            finally:
-                # Always resume the print job
-                self._logger.debug("Job resumed")
                 
                 
     
